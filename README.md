@@ -48,3 +48,12 @@ Below you can find a diagram of how the unconditionally secure transmissions wor
 <p float="left">
     <img src="file-transfer-diagram.png" alt="Diagram of the unconditionally secure file transfer enhanced by QKD" width="500"/>
 </p>
+
+As can be seen in the protocol diagram, Alice and Bob need to have a point-to-point connection to the QKD systems in order to preserve the unconditional security property of this protocol. Considering the situation where Bob is the sender and Alice the receiver, Bob would need to request keys from their QKD equipment, and then transmit the ciphertext and key ids over a public channel towards the broker, which then forwards the information to Alice. Afterwards, Alice will request the actual keys from their QKD equipment using the key ids provided by Bob, and will then proceed to decrypt the ciphertext. These steps continue until the original message of Bob has been entirely sent. 
+
+The existence of the broker comes as a solution for possible security considerations that neither Alice and Bob may have public IPs. Therefore, an intermediary with a known public IP is needed to broker the information transfer. Since the broker only passes the ciphertext and key ids, the security of this scheme is not compromised.
+
+2024 Quantum Team @ UPB
+
+This work has been developed within RoNaQCI, part of EuroQCI, DIGITAL-2021-QCI-01-DEPLOY-NATIONAL, 101091562.
+

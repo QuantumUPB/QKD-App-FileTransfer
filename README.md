@@ -1,16 +1,21 @@
 # Q-BITS: Quantum-Based Information Transfer System
-### Unconditionally-Secure File Transfer Application
+## Unconditionally-Secure File Transfer Application
+
+<p float="left">
+    <img src="upb.png" alt="University Politehnica of Bucharest" width="50"/>
+    <img src="LogoIQC.png" alt="Quantum Team @ UPB" width="100"/>
+</p>
 
 This application implements an unconditionally secure file transfer protocol enhanced by QKD.
 
 This application has been developed by the Quantum Team @ UPB, and is provided to everyone for fair usage according to the License. This provided version of the application only implements the communication protocol between two parties, who can both either be a sender or receiver of files.
 
-## Features:
+### Features:
 
 - Secure file transfer using One-Time Pad (OTP) encryption enhanced by QKD.
 - Straighforward, user-friendly interface.
 
-## Requirements:
+### Requirements:
 
 - Python 3
 - `tkinter` library for GUI elements
@@ -24,7 +29,7 @@ To install all the required dependencies use
 
 - A point-to-point connection to a QKD device, and a way to get keys that can interface with QKGTTR module.
 
-## Running the application:
+### Running the application:
 
 Run the script from the command line, specifying either "Alice" or "Bob" as the first argument depending on which party you want to run the application for: 
 

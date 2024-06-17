@@ -1,4 +1,5 @@
-# Unconditionally-Secure File Transfer Application
+# Q-BITS: Quantum-Based Information Transfer System
+### Unconditionally-Secure File Transfer Application
 
 This application implements an unconditionally secure file transfer protocol enhanced by QKD.
 

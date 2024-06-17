@@ -45,3 +45,6 @@ If receiving, the application listens for incoming transmissions. If not activel
     
 Below you can find a diagram of how the unconditionally secure transmissions work.
 
+<p float="left">
+    <img src="file-transfer-diagram.png" alt="Diagram of the unconditionally secure file transfer enhanced by QKD" width="500"/>
+</p>

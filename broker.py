@@ -25,7 +25,7 @@ class Broker:
             print("Sender accepted")
             while self.client_conn is None: # Wait until client connects
                 continue
-            print("Receiver connected, continuing")
+            print("Sender connected, continuing")
             server_conn.send(bytes("ok", 'utf-8'))
             # Send the number of segments and name
             data = server_conn.recv(1024)

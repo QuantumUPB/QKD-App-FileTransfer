@@ -4,8 +4,6 @@ from PyQt5.QtWidgets import (
     QFileDialog, QTreeView, QFileSystemModel, QProgressBar, QStatusBar, QFrame, QMessageBox
 )
 from PyQt5.QtCore import QTimer, QTime
-from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt
 
 import subprocess
 import json
@@ -17,13 +15,13 @@ import threading
 import sys
 from tqdm import tqdm
 
+from qasync import QEventLoop, asyncSlot
+
 import sys
 import signal
 
 import numpy as np
 import os
-
-import threading
 
 qkdgkt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'QKD-Infra-GetKey'))
 sys.path.append(qkdgkt_path)
@@ -42,7 +40,6 @@ class KeyContainer:
 
 class QKDTransferApp(QWidget):
     def __init__(self):
-        self.sending = None
         super().__init__()
         self.initUI()
 
@@ -183,7 +180,7 @@ class QKDTransferApp(QWidget):
         self.send_button.setEnabled(False)
         self.send_button.clicked.connect(self.send_loop)
 
-        self.instructions_label = QLabel('<b>Send and Receive:</b>')
+        self.instructions_label = QLabel('<b>Instructions and Status:</b>')
         self.listening_label = QLabel('Listening for incoming files...')
 
         self.progress_bar = QProgressBar()
@@ -198,35 +195,6 @@ class QKDTransferApp(QWidget):
         self.right_layout.addWidget(self.listening_label)
         self.right_layout.addWidget(self.progress_bar)
         self.right_layout.addStretch(1)
-
-        # create an about section in the right layout
-        # configure about section
-        self.about_layout = QVBoxLayout()
-        # bold title label
-        self.about_label = QLabel('<b>QKD Unconditionally Secure File Transfer</b>')
-        self.about_label.setWordWrap(True)
-        self.about_layout.addWidget(self.about_label)
-        # add two logos to about section
-        self.logo = QLabel()
-        self.logo.setPixmap(QPixmap("Logo.png").scaled(200, 200, Qt.KeepAspectRatio))
-        self.logo2 = QLabel()
-        self.logo2.setPixmap(QPixmap("upb.png").scaled(100, 100, Qt.KeepAspectRatio))
-        self.logo_layout = QHBoxLayout()
-        self.logo_layout.addWidget(self.logo)
-        self.logo_layout.addWidget(self.logo2)
-        self.about_layout.addLayout(self.logo_layout)
-        self.about_label_website = QLabel('<a href="https://quantum.upb.ro/">Visit Website</a>')
-        self.about_label_website.setOpenExternalLinks(True)
-        self.about_label_github = QLabel('<a href="https://github.com/QuantumUPB/QKD-App-FileTransfer">GitHub Repository</a>')
-        self.about_label_github.setOpenExternalLinks(True)
-        self.about_layout.addWidget(self.about_label_website)
-        self.about_layout.addWidget(self.about_label_github)
-        self.about_layout.addStretch(1)
-        # fix about section width
-        self.about_label.setFixedWidth(400)
-
-        # Add about section to right layout
-        self.right_layout.addLayout(self.about_layout)
         self.right_layout.addWidget(self.status_bar)
 
         # Add explorer and right layouts to main transfer layout
@@ -251,24 +219,20 @@ class QKDTransferApp(QWidget):
 
         if self.progress_bar.value() >= 100:
             self.timer.stop()
-            message = 'File sent successfully!' if self.sending else 'File received successfully!'
-            self.status_bar.showMessage(message)
+            self.status_bar.showMessage('File sent successfully!')
             self.progress_bar.setVisible(False)
         else:
             self.status_bar.showMessage(f'Sending file [{elapsed_time // 60 :02d}:{(elapsed_time % 60):02d} elapsed]')
 
+    @asyncSlot()
     async def send_file(self):
         async with lock:
-            self.sending=True
             print(f"Sending file: {self.selected_file_path}")
 
             #  file sending and update progress
             self.progress_bar.setVisible(True)
             self.progress_bar.setValue(0)
             self.status_bar.showMessage('Sending file...')
-
-            # hide the "listening for incoming files" label
-            self.listening_label.setVisible(False)
 
             self.start_time = QTime.currentTime()
             self.timer = QTimer(self)
@@ -330,8 +294,7 @@ class QKDTransferApp(QWidget):
                 accumulated_keys = bytearray()
                 key_objects = []
                 for _ in range(5):
-                    output = qkdgkt.qkd_get_key_custom_params('UPB-AP-UPBC', '141.85.241.65:12443', 'upb-ap.crt', 'qkd.key', 'qkd-ca.crt', 'pgpopescu', 'Request')
-                    print(output)
+                    output = qkdgkt.qkd_get_key_custom_params('Campus', 'Precis', 'upb-ap.crt', 'qkd,key', 'qkd-ca.crt', 'pgpopescu', 'Request')
                     response = json.loads(output)
 
                     # Extract the key and key_ID values
@@ -387,14 +350,9 @@ class QKDTransferApp(QWidget):
             self.nr_segments = self.total_segments
             self.update_progress()
             client_socket.close()
-
-            # re-show the "listening for incoming files" label
-            self.listening_label.setVisible(True)
-
             print("MD5 Hash of original message:", hashlib.md5(message).hexdigest())
 
-    def receive_file(self):
-        self.sending=False
+    async def receive_file(self):
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         ip = self.ip
@@ -415,30 +373,30 @@ class QKDTransferApp(QWidget):
         print("File name: " + file_path)
         print("Payload length: " + str(msg_len) + " bytes.")
 
-        # async with lock:
-        if True:
+        async with self.lock:  # Assuming `lock` is a member of the class
             print("Lock acquired")
-            # open pyqt5 dialog to confirm receive
-
-            # confirm = QMessageBox()
-            # confirm.setIcon(QMessageBox.Question)
-            # confirm.setText(f"Receive file {file_path} of {msg_len} bytes?")
-            # confirm.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-            # confirm.setDefaultButton(QMessageBox.Yes)
-            # response = confirm.exec_()
-            # print(response)
-            # if response == QMessageBox.No:
-            #     client_socket.send(bytes("reject", 'utf-8'))
-            #     client_socket.close()
-            #     return
             
-            # open pyqt5 dialog to select save location
+            # Open PyQt5 dialog to confirm receive
+            confirm = QMessageBox()
+            confirm.setIcon(QMessageBox.Question)
+            confirm.setText(f"Receive file {file_path} of {msg_len} bytes?")
+            confirm.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            confirm.setDefaultButton(QMessageBox.Yes)
+            
+            response = await self.show_async_message_box(confirm)
+            if response == QMessageBox.No:
+                client_socket.send(bytes("reject", 'utf-8'))
+                client_socket.close()
+                return
 
-            # file_path = QFileDialog.getSaveFileName(None, "Save File", file_path)[0]
-            # if not file_path:
-            #     client_socket.send(bytes("reject", 'utf-8'))
-            #     client_socket.close()
-            #     return
+            # Open PyQt5 dialog to select save location
+            save_dialog = QFileDialog()
+            file_path, _ = await self.show_async_file_dialog(save_dialog, "Save File", file_path)
+            
+            if not file_path:
+                client_socket.send(bytes("reject", 'utf-8'))
+                client_socket.close()
+                return
             
             remaining_len = msg_len
             seg_no = int(np.ceil(msg_len / seg_length))
@@ -448,15 +406,12 @@ class QKDTransferApp(QWidget):
             #  file sending and update progress
             self.progress_bar.setVisible(True)
             self.progress_bar.setValue(0)
-            self.status_bar.showMessage('Receiving file...')
+            self.status_bar.showMessage('Sending file...')
 
             self.start_time = QTime.currentTime()
             self.timer = QTimer(self)
             self.timer.timeout.connect(self.update_progress)
             self.timer.start(100)  # Update progress every 100ms
-
-            # hide the "listening for incoming files" label
-            self.listening_label.setVisible(False)
 
             print("Payload length: " + str(msg_len) + " bytes.")
             accumulated_keys = bytearray()
@@ -483,7 +438,7 @@ class QKDTransferApp(QWidget):
                     key_ids = key_ids_enc.decode('utf-8').split('|')
 
                     for key_id in key_ids:
-                        output = qkdgkt.qkd_get_key_custom_params('UPB-AP-UPBP', '141.85.241.65:22443', 'upb-ap.crt', 'qkd.key', 'qkd-ca.crt', 'pgpopescu', 'Response', key_id)
+                        output = qkdgkt.qkd_get_key_custom_params('Precis', 'Campus', 'upb-ap.crt', 'qkd,key', 'qkd-ca.crt', 'pgpopescu', 'Response', key_id)
                         response = json.loads(output)
                         print(response)
 
@@ -508,47 +463,45 @@ class QKDTransferApp(QWidget):
             self.nr_segments = self.total_segments
             self.update_progress()
 
-            # re-show the "listening for incoming files" label
-            self.listening_label.setVisible(True)
-
             with open(file_path, "wb") as file:
                 file.write(decrypted_message)
 
-    def continuous_receive_file(self):
+    # @asyncSlot()
+    async def continuous_receive_file(self):
         while True:
-            try:
-                self.receive_file()
-            except Exception as e:
-                print(f"Error occurred: {str(e)}")
-                continue
-
-    def start_receive_file_thread(self):
-        # Create a thread to run the `receive_file` method
-        receive_thread = threading.Thread(target=self.continuous_receive_file)
-        receive_thread.start()
-
-    def start_send_file_thread(self):
-        # Create a thread to run the `send_file` method
-        send_thread = threading.Thread(target=self.send_file)
-        send_thread.start()
+            await self.receive_file()
         
     def start_asyncio_loop(self, loop):
         asyncio.set_event_loop(loop)
         loop.run_forever()
 
     def recv_loop(self):
-        # loop = asyncio.new_event_loop()
-        # threading.Thread(target=self.start_asyncio_loop, args=(loop,), daemon=True).start()
-        # # Schedule the continuous_receive_file function to run in the asyncio event loop
-        # asyncio.run_coroutine_threadsafe(self.continuous_receive_file(), loop)
-        self.start_receive_file_thread()
+        asyncio.create_task(self.continuous_receive_file())
 
     def send_loop(self):
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(self.send_file())
+        asyncio.create_task(self.send_file())
+    
+    async def show_async_message_box(self, msg_box):
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, msg_box.exec_)
+        return result
+
+    async def show_async_file_dialog(self, dialog, caption, directory):
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: dialog.getSaveFileName(None, caption, directory))
+        return result
 
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    ex = QKDTransferApp()
-    sys.exit(app.exec_())
+    loop = QEventLoop(app)
+    asyncio.set_event_loop(loop)
+
+    app_close_event = asyncio.Event()
+    app.aboutToQuit.connect(app_close_event.set)
+
+    main_window = QKDTransferApp()
+    main_window.show()
+
+    loop.run_until_complete(app_close_event.wait())
+    loop.close()

@@ -7,26 +7,14 @@ from PyQt5.QtCore import QTimer, QTime
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt
 from PyQt5.QtCore import pyqtSlot
+from PyQt5.QtWidgets import QComboBox
 
 from receive import FileReceiverWorker
+from send import FileSendWorker
 
-import subprocess
-import json
-import time
 import asyncio
-import hashlib
-import socket
-import threading
 import sys
-from tqdm import tqdm
-
-import sys
-import signal
-
-import numpy as np
 import os
-
-import threading
 
 qkdgkt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'QKD-Infra-GetKey'))
 sys.path.append(qkdgkt_path)
@@ -34,20 +22,12 @@ import qkdgkt
 
 import zmq
 
-lock = asyncio.Lock()
-seg_length = 220
-key_length = 184
-
-
-class KeyContainer:
-    def __init__(self, key, key_ID):
-        self.key = key
-        self.key_ID = key_ID
-
-
 class QKDTransferApp(QWidget):
     def __init__(self):
         self.sending = None
+        self.config = qkdgkt.qkd_get_config()
+        self.locations = qkdgkt.qkd_get_locations()
+        self.client_list = []
         super().__init__()
         self.initUI()
 
@@ -78,6 +58,15 @@ class QKDTransferApp(QWidget):
         self.name_label = QLabel('Name:')
         self.name_field = QLineEdit('Alice')
 
+        # dropdown select location of client
+        self.location_label = QLabel('Location:')
+        self.location_dropdown = QComboBox()
+        self.location_dropdown.addItems(self.locations)
+        # find the index of myname
+        myloc = qkdgkt.qkd_get_myself()
+        myloc_index = self.locations.index(myloc)
+        self.location_dropdown.setCurrentIndex(myloc_index)
+
         self.connect_button = QPushButton('Connect')
         self.connect_button.clicked.connect(self.connect_to_server)
 
@@ -90,6 +79,8 @@ class QKDTransferApp(QWidget):
         self.connection_layout.addWidget(self.port_field)
         self.connection_layout.addWidget(self.name_label)
         self.connection_layout.addWidget(self.name_field)
+        self.connection_layout.addWidget(self.location_label)
+        self.connection_layout.addWidget(self.location_dropdown)
         self.connection_layout.addWidget(self.connect_button)
 
         # Add connection layout to main layout
@@ -97,10 +88,14 @@ class QKDTransferApp(QWidget):
 
     def update_client_list(self):
         self.socket.send_string("list_clients")
-        reply = self.socket.recv_string()
-        client_list = reply.split(",")
+    
+    @pyqtSlot(str)
+    def handle_updated_client_list(self, reply):
+        client_list = reply.split("|")
         print("Connected clients:", client_list)
-        self.client_list = client_list
+        self.client_list = [client.split("/") for client in client_list]
+        self.client_dropdown.clear()
+        self.client_dropdown.addItems([client[0] for client in self.client_list if client[0] != self.client_name])
 
     def connect_to_server(self):
         # make connect button disabled
@@ -110,6 +105,7 @@ class QKDTransferApp(QWidget):
         # Placeholder for connection logic
         ip = self.ip_field.text()
         port = int(self.port_field.text())
+        self.location = self.location_dropdown.currentText()
                    
         # Here you would add the actual connection logic using ip and port
         print(f"Connecting to {ip}:{port}...")
@@ -121,7 +117,7 @@ class QKDTransferApp(QWidget):
         self.socket = self.context.socket(zmq.DEALER)
         self.socket.connect(f"tcp://{ip}:{port}")
 
-        self.socket.send_string(f"register:{self.client_name}")
+        self.socket.send_string(f"register:{self.client_name}/{self.location}")
         reply = self.socket.recv_string()
         if reply == "ok":
             print(f"Registered as {self.client_name}")
@@ -131,29 +127,32 @@ class QKDTransferApp(QWidget):
         self.update_client_list()
 
         # Start the file receiver worker
-        self.file_receiver_worker = FileReceiverWorker(self.socket)
-        self.file_receiver_worker.received_signal.connect(self.handle_received_data)
+        self.file_receiver_worker = FileReceiverWorker(self.socket, self.location)
+        self.file_receiver_worker.signal_list_clients.connect(self.handle_updated_client_list)
+        self.file_receiver_worker.signal_start_progress.connect(self.start_progress)
+        self.file_receiver_worker.signal_update_progress.connect(self.update_progress)
+        self.file_receiver_worker.signal_end_progress.connect(self.end_progress)
         self.file_receiver_worker.start()
+
+        # Start the file send worker
+        self.file_send_worker = FileSendWorker(self.socket)
+        self.file_send_worker.signal_start_progress.connect(self.start_progress)
+        self.file_send_worker.signal_update_progress.connect(self.update_progress)
+        self.file_send_worker.signal_end_progress.connect(self.end_progress)
+        self.file_send_worker.start()
 
         # # If connection is successful, proceed to the main interface
         self.switch_to_main_interface()
 
-        # Start the receiver loop
-        # self.recv_loop()
-
-    @pyqtSlot(str)
-    def handle_received_data(self, data):
-        # self.text_edit.append(data)
-        print("Signal:")
-        # split data into clientname:content
-        parts = data.split(":", 1)
-        client_name = parts[0]
-        content = parts[1]
-        print(f"Received data from {client_name}: {content}")
+    @pyqtSlot(str, list)
+    def handle_received_data(self, from_name, message_parts):
+        pass
 
     def closeEvent(self, event):
-        self.file_receiver_worker.stop()
-        # self.file_receiver_worker.wait()
+        if hasattr(self, 'file_send_worker'):
+            self.file_send_worker.stop()
+        if hasattr(self, 'file_receiver_worker'):
+            self.file_receiver_worker.stop()
         event.accept()
 
     def switch_to_main_interface(self):
@@ -195,9 +194,13 @@ class QKDTransferApp(QWidget):
         self.refresh_button = QPushButton('Refresh Client List')
         self.refresh_button.clicked.connect(self.update_client_list)
 
+        # dropdown select client to send file to
+        self.client_label = QLabel('Send to:')
+        self.client_dropdown = QComboBox()
+
         self.send_button = QPushButton('SEND')
         self.send_button.setEnabled(False)
-        self.send_button.clicked.connect(self.send_loop)
+        self.send_button.clicked.connect(self.add_sending_file)
 
         self.instructions_label = QLabel('<b>Send and Receive:</b>')
         self.listening_label = QLabel('Listening for incoming files...')
@@ -211,6 +214,8 @@ class QKDTransferApp(QWidget):
 
         self.right_layout.addWidget(self.instructions_label)
         self.right_layout.addWidget(self.refresh_button)
+        self.right_layout.addWidget(self.client_label)
+        self.right_layout.addWidget(self.client_dropdown)
         self.right_layout.addWidget(self.send_button)
         self.right_layout.addWidget(self.listening_label)
         self.right_layout.addWidget(self.progress_bar)
@@ -258,10 +263,12 @@ class QKDTransferApp(QWidget):
         self.selected_file_path = self.file_system_model.filePath(index)
         self.send_button.setEnabled(True)
 
-    def update_progress(self):
-        nr_segments = self.nr_segments
-        total_segments = self.total_segments
+    def update_timer(self):
+        elapsed_time = int(self.start_time.elapsed() / 1000)
+        self.status_bar.showMessage(f'Sending file [{elapsed_time // 60 :02d}:{(elapsed_time % 60):02d} elapsed]')
 
+    @pyqtSlot(int, int)
+    def update_progress(self, nr_segments, total_segments):
         # Update the progress bar at nr_segments / total_segments
         self.progress_bar.setValue(int(nr_segments / total_segments * 100))
         elapsed_time = int(self.start_time.elapsed() / 1000)  # Elapsed time in seconds
@@ -274,258 +281,29 @@ class QKDTransferApp(QWidget):
         else:
             self.status_bar.showMessage(f'Sending file [{elapsed_time // 60 :02d}:{(elapsed_time % 60):02d} elapsed]')
 
-    async def send_file(self):
-        async with lock:
-            self.sending=True
-            print(f"Sending file: {self.selected_file_path}")
+    @pyqtSlot()
+    def start_progress(self):
+        #  file sending and update progress
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.status_bar.showMessage('Sending file...')
+        self.listening_label.setVisible(False)
+        self.start_time = QTime.currentTime()
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_timer)
+        self.timer.start(100)  # Update progress every 100ms
 
-            #  file sending and update progress
-            self.progress_bar.setVisible(True)
-            self.progress_bar.setValue(0)
-            self.status_bar.showMessage('Sending file...')
+    @pyqtSlot()
+    def end_progress(self):
+        self.progress_bar.setValue(100)
+        self.status_bar.showMessage('File sent successfully!')
+        self.progress_bar.setVisible(False)
 
-            # hide the "listening for incoming files" label
-            self.listening_label.setVisible(False)
-
-            self.start_time = QTime.currentTime()
-            self.timer = QTimer(self)
-            self.timer.timeout.connect(self.update_progress)
-            self.timer.start(100)  # Update progress every 100ms
-
-            file_path = self.selected_file_path
-            message = ""
-            file_name = file_path.split('/')[-1]
-            print("Sending: " + file_name)
-            with open(file_path, "rb") as file:
-                message = file.read()
-
-            number_of_segments = int(np.ceil(len(message) / seg_length))
-            self.nr_segments = 0
-            self.total_segments = number_of_segments
-
-            # Send the number of segments needed for the message via zmq
-            try:
-                # Convert the number of segments to bytes
-                encrypted_message_bytes = bytes(str(len(message)) + "/" + file_name, 'utf-8')
-
-                # Send the metadata to relay Bob via zmq
-                self.socket.send(f"relay:Bob:{encrypted_message_bytes}".encode())
-                print("Metadata sent successfully!")
-            except ConnectionRefusedError:
-                print("Connection refused. Make sure the server is running.")
-                return
-
-            # Execute the curl command periodically and accumulate keys
-            for i in tqdm(range(number_of_segments)):
-                self.nr_segments += 1
-                self.update_progress()
-
-                accumulated_keys = bytearray()
-                key_objects = []
-                for _ in range(5):
-                    output = qkdgkt.qkd_get_key_custom_params('UPB-AP-UPBC', '141.85.241.65:12443', 'upb-ap.crt', 'qkd.key', 'qkd-ca.crt', 'pgpopescu', 'Request')
-                    print(output)
-                    response = json.loads(output)
-
-                    # Extract the key and key_ID values
-                    keys = response['keys']
-                    for key_data in keys:
-                        key = key_data['key']
-                        key_ID = key_data['key_ID']
-                        key_object = KeyContainer(key, key_ID)
-                        key_objects.append(key_object)
-
-                        # Accumulate the key bytes
-                        accumulated_keys.extend(bytearray(key, 'utf-8'))
-
-                batch_len = min(len(accumulated_keys), len(message))
-
-                # Perform OTP encryption by XORing the message with the accumulated keys
-                encrypted_message = bytearray()
-                for i in range(batch_len):
-                    encrypted_byte = message[i] ^ accumulated_keys[i]
-                    encrypted_message.append(encrypted_byte)
-
-                # Print the encrypted message
-                key_ids_list = []
-                for key_obj in key_objects:
-                    key_ids_list.append(key_obj.key_ID)
-
-                message = message[batch_len:]
-
-                try:
-                    # Convert the encrypted message to bytes
-                    encrypted_message_bytes = bytes(encrypted_message)
-
-                    # Send the encrypted message
-                    self.socket.send(f"relay:Bob:{encrypted_message_bytes}".encode())
-                except ConnectionRefusedError:
-                    print("Connection refused. Make sure the server is running.")
-
-                try:
-                    # Convert the key_ids to bytes
-                    combined_key_ids = '|'.join(key_ids_list)
-                    key_ids_bytes = combined_key_ids.encode('utf-8')
-
-                    # Send the key ids
-                    self.socket.send(f"relay:Bob:{key_ids_bytes}".encode())
-                except ConnectionRefusedError:
-                    print("ECONNREFUSED")
-
-            self.nr_segments = self.total_segments
-            self.update_progress()
-
-            # re-show the "listening for incoming files" label
-            self.listening_label.setVisible(True)
-
-            print("MD5 Hash of original message:", hashlib.md5(message).hexdigest())
-
-    def receive_file(self):
-        self.sending=False
-
-        print("Awaiting for sender to begin transmission.")
-        # receive from server a string with the metadata
-        metadata_raw = self.socket.recv_string()
-        print(metadata_raw)
-        return
-        # client_id, message = parts
-        print("Metadata received successfully!")
-        msg_len = int(metadata_raw.split("/".encode('utf-8'))[0])
-        file_path = str(metadata_raw.split("/".encode('utf-8'))[-1], 'utf-8')
-        print("File name: " + file_path)
-        print("Payload length: " + str(msg_len) + " bytes.")
-
-        # async with lock:
-        if True:
-            print("Lock acquired")
-            # open pyqt5 dialog to confirm receive
-
-            # confirm = QMessageBox()
-            # confirm.setIcon(QMessageBox.Question)
-            # confirm.setText(f"Receive file {file_path} of {msg_len} bytes?")
-            # confirm.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-            # confirm.setDefaultButton(QMessageBox.Yes)
-            # response = confirm.exec_()
-            # print(response)
-            # if response == QMessageBox.No:
-            #     client_socket.send(bytes("reject", 'utf-8'))
-            #     client_socket.close()
-            #     return
-            
-            # open pyqt5 dialog to select save location
-
-            # file_path = QFileDialog.getSaveFileName(None, "Save File", file_path)[0]
-            # if not file_path:
-            #     client_socket.send(bytes("reject", 'utf-8'))
-            #     client_socket.close()
-            #     return
-            
-            remaining_len = msg_len
-            seg_no = int(np.ceil(msg_len / seg_length))
-            self.total_segments = seg_no
-            self.nr_segments = 0
-
-            #  file sending and update progress
-            self.progress_bar.setVisible(True)
-            self.progress_bar.setValue(0)
-            self.status_bar.showMessage('Receiving file...')
-
-            self.start_time = QTime.currentTime()
-            self.timer = QTimer(self)
-            self.timer.timeout.connect(self.update_progress)
-            self.timer.start(100)  # Update progress every 100ms
-
-            # hide the "listening for incoming files" label
-            self.listening_label.setVisible(False)
-
-            print("Payload length: " + str(msg_len) + " bytes.")
-            accumulated_keys = bytearray()
-            encrypted_message = bytearray()
-            client_socket.send(bytes('ok', 'utf-8'))
-
-            print(seg_no)
-
-            for i in tqdm(range(seg_no)):
-                # update progress bar
-                self.nr_segments += 1
-                self.update_progress()
-
-                # Receive data from the client
-                new_data = client_socket.recv(min(seg_length, remaining_len))
-                encrypted_message.extend(new_data)
-                remaining_len -= len(new_data)
-
-                # Receive key ids from the client
-                key_ids_enc = client_socket.recv(key_length)
-
-                if encrypted_message:
-                    # Perform further processing on the encrypted message as needed
-                    key_ids = key_ids_enc.decode('utf-8').split('|')
-
-                    for key_id in key_ids:
-                        output = qkdgkt.qkd_get_key_custom_params('UPB-AP-UPBP', '141.85.241.65:22443', 'upb-ap.crt', 'qkd.key', 'qkd-ca.crt', 'pgpopescu', 'Response', key_id)
-                        response = json.loads(output)
-                        print(response)
-
-                        keys = response['keys']
-                        for key_data in keys:
-                            key = key_data['key']
-                            accumulated_keys.extend(bytearray(key, 'utf-8'))
-                            
-                client_socket.send(bytes('ok', 'utf-8'))
-
-            # Close the client socket
-            client_socket.close()
-
-            decrypted_message = bytearray()
-            for i in range(len(encrypted_message)):
-                decrypted_byte = encrypted_message[i] ^ accumulated_keys[i]
-                decrypted_message.append(decrypted_byte)
-
-            md5_hash = hashlib.md5(decrypted_message).hexdigest()
-            print("MD5 hash of original message:", md5_hash)
-
-            self.nr_segments = self.total_segments
-            self.update_progress()
-
-            # re-show the "listening for incoming files" label
-            self.listening_label.setVisible(True)
-
-            with open(file_path, "wb") as file:
-                file.write(decrypted_message)
-
-    def continuous_receive_file(self):
-        while True:
-            try:
-                self.receive_file()
-            except Exception as e:
-                print(f"Error occurred: {str(e)}")
-                continue
-
-    def start_receive_file_thread(self):
-        # Create a thread to run the `receive_file` method
-        receive_thread = threading.Thread(target=self.continuous_receive_file)
-        receive_thread.start()
-
-    def start_send_file_thread(self):
-        # Create a thread to run the `send_file` method
-        send_thread = threading.Thread(target=self.send_file)
-        send_thread.start()
-        
-    def start_asyncio_loop(self, loop):
-        asyncio.set_event_loop(loop)
-        loop.run_forever()
-
-    def recv_loop(self):
-        # loop = asyncio.new_event_loop()
-        # threading.Thread(target=self.start_asyncio_loop, args=(loop,), daemon=True).start()
-        # # Schedule the continuous_receive_file function to run in the asyncio event loop
-        # asyncio.run_coroutine_threadsafe(self.continuous_receive_file(), loop)
-        self.start_receive_file_thread()
-
-    def send_loop(self):
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(self.send_file())
+    def add_sending_file(self):
+        # get selected client
+        selected_client = self.client_dropdown.currentText()
+        client_location = [client[1] for client in self.client_list if client[0] == selected_client][0]
+        self.file_send_worker.add_file(selected_client, self.selected_file_path, self.location, client_location)
 
 
 if __name__ == '__main__':

@@ -5,12 +5,11 @@ import os
 import sys
 import json
 import time
+import base64
 
-seg_length = 220
-key_length = 184
+seg_length = 120
 
-
-qkdgkt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'QKD-Infra-GetKey'))
+qkdgkt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'QKD-Infra-GetKey'))
 sys.path.append(qkdgkt_path)
 import qkdgkt
 
@@ -20,12 +19,16 @@ class SendFile:
         self.file_path = file_path
         self.src_location = src_location
         self.dest_location = dest_location
+        self.received_ack = True
 
         message = ""
         file_name = file_path.split('/')[-1]
         print("Sending: " + file_name)
         with open(file_path, "rb") as file:
             message = file.read()
+        
+        md5_hash = hashlib.md5(message).hexdigest()
+        print("MD5 hash of original message:", md5_hash)
 
         self.file_name = file_name
         self.message = message
@@ -51,18 +54,29 @@ class FileSendWorker(QThread):
         sending_file = SendFile(to_name, file_path, src_location, dest_location)
         self.sending_files.append(sending_file)
         self.signal_start_progress.emit()
+    
+    def handle_ack(self, to_name):
+        for sending_file in self.sending_files:
+            if sending_file.to_name == to_name:
+                sending_file.received_ack = True
+                break
 
     def run(self):
         while self.running:
             if self.sending_files:
-                sending_file = self.sending_files[0]
-                if not sending_file.metadata_sent:
-                    self.send_metadata(sending_file)
-                elif sending_file.nr_segments < sending_file.total_segments:
-                    self.send_segment(sending_file)
-                else:
-                    self.sending_files.pop(0)
-                    self.signal_end_progress.emit()
+                for i in range(len(self.sending_files)):
+                    sending_file = self.sending_files[i]
+
+                    if not sending_file.received_ack:
+                        continue
+
+                    if not sending_file.metadata_sent:
+                        self.send_metadata(sending_file)
+                    elif sending_file.nr_segments < sending_file.total_segments:
+                        self.send_segment(sending_file)
+                    else:
+                        self.sending_files.pop(i)
+                        self.signal_end_progress.emit()
     
     def send_metadata(self, sending_file):
         # Send the number of segments needed for the message via zmq
@@ -85,12 +99,12 @@ class FileSendWorker(QThread):
         # sending_file.update_progress()
         accumulated_keys = bytearray()
         key_ids_list = []
-        for _ in range(5):
+        while len(accumulated_keys) < seg_length:
             key, key_ID = self.get_key(sending_file.dest_location, sending_file.src_location)
             accumulated_keys.extend(bytearray(key, 'utf-8'))
             key_ids_list.append(key_ID)
 
-        batch_len = min(len(accumulated_keys), len(message))
+        batch_len = min(seg_length, len(message))
 
         # Perform OTP encryption by XORing the message with the accumulated keys
         encrypted_message = bytearray()
@@ -110,7 +124,7 @@ class FileSendWorker(QThread):
             self.socket.send_multipart([f"relay:{sending_file.to_name}".encode(), "segment".encode(), encrypted_message_bytes, key_ids_bytes])
 
             # sleep 1 second using sleep
-            time.sleep(1)
+            # time.sleep(1)
             
         except ConnectionRefusedError:
             print("ECONNREFUSED")
@@ -119,6 +133,7 @@ class FileSendWorker(QThread):
         sending_file.message = message[batch_len:]
 
         self.signal_update_progress.emit(sending_file.nr_segments, sending_file.total_segments)
+        sending_file.received_ack = False
 
     def stop(self):
         self.running = False

@@ -12,11 +12,10 @@ from PyQt5.QtWidgets import QComboBox
 from receive import FileReceiverWorker
 from send import FileSendWorker
 
-import asyncio
 import sys
 import os
 
-qkdgkt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'QKD-Infra-GetKey'))
+qkdgkt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'QKD-Infra-GetKey'))
 sys.path.append(qkdgkt_path)
 import qkdgkt
 
@@ -132,6 +131,7 @@ class QKDTransferApp(QWidget):
         self.file_receiver_worker.signal_start_progress.connect(self.start_progress)
         self.file_receiver_worker.signal_update_progress.connect(self.update_progress)
         self.file_receiver_worker.signal_end_progress.connect(self.end_progress)
+        self.file_receiver_worker.signal_received_ack.connect(self.handle_ack)
         self.file_receiver_worker.start()
 
         # Start the file send worker
@@ -143,6 +143,10 @@ class QKDTransferApp(QWidget):
 
         # # If connection is successful, proceed to the main interface
         self.switch_to_main_interface()
+
+    @pyqtSlot(str)
+    def handle_ack(self, from_name):
+        self.file_send_worker.handle_ack(from_name)
 
     @pyqtSlot(str, list)
     def handle_received_data(self, from_name, message_parts):

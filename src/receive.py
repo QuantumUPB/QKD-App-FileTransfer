@@ -4,16 +4,13 @@ import hashlib
 import os
 import sys
 import json
+import base64
 
+seg_length = 120
 
-seg_length = 220
-key_length = 184
-
-
-qkdgkt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'QKD-Infra-GetKey'))
+qkdgkt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'QKD-Infra-GetKey'))
 sys.path.append(qkdgkt_path)
 import qkdgkt
-
 
 class ReceivingFile:
     def __init__(self, program, from_name, file_path, msg_len, src_location):
@@ -35,6 +32,7 @@ class ReceivingFile:
         self.remaining_len -= len(segment_data)
 
         self.accumulated_data.extend(segment_data)
+        keys = keys[:len(segment_data)]
         self.accumulated_keys.extend(keys)
 
     def check_file_ready_to_save(self):
@@ -63,6 +61,7 @@ class FileReceiverWorker(QThread):
     signal_start_progress = pyqtSignal()
     signal_update_progress = pyqtSignal(int, int)
     signal_end_progress = pyqtSignal()
+    signal_received_ack = pyqtSignal(str)
 
     def __init__(self, socket, location):
         super().__init__()
@@ -103,6 +102,8 @@ class FileReceiverWorker(QThread):
                 keys.extend(bytearray(key, 'utf-8'))
 
             receiving_file.receive_segment(segment_data, keys)
+            # encode segment_data in base64
+            base64_encoded = base64.b64encode(segment_data).decode('ascii')
 
             self.signal_update_progress.emit(receiving_file.nr_segments, receiving_file.total_segments)
 
@@ -111,14 +112,17 @@ class FileReceiverWorker(QThread):
                 del self.receiving_files[from_name]
                 self.signal_end_progress.emit()
 
-            print(f"Received segment from {from_name}", receiving_file.nr_segments, "/", receiving_file.total_segments)
+            self.socket.send_multipart([f"relay:{from_name}".encode(), "ack".encode()])
+
+            # print(f"Received segment from {from_name}", receiving_file.nr_segments, "/", receiving_file.total_segments)
+
+        elif command == "ack":
+            self.signal_received_ack.emit(from_name)
 
     def run(self):
         while self.running:
-            # Receive the multipart message
             message_parts = self.socket.recv_multipart()
-            print(message_parts)
-            # Extract the message content
+            # print(message_parts)
             server_command = message_parts[0].decode()
             if server_command == "relay":
                 self.handle_relay(message_parts[1:])
@@ -141,7 +145,6 @@ class FileReceiverWorker(QThread):
 
         output = qkdgkt.qkd_get_key_custom_params(endpoint, ipport, cert, cakey, cacert, pempassword, 'Response', key_id)
         response = json.loads(output)
-        # print(response)
 
         keys = response['keys']
         for key_data in keys:

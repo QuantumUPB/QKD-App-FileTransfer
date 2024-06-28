@@ -5,8 +5,11 @@ import os
 import sys
 import json
 import base64
+import time
 
-seg_length = 120
+with open('config.json') as f:
+    config = json.load(f)["filetransfer"]
+seg_length = config['segment_size']
 
 qkdgkt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'QKD-Infra-GetKey'))
 sys.path.append(qkdgkt_path)
@@ -58,7 +61,7 @@ class ReceivingFile:
 
 class FileReceiverWorker(QThread):
     signal_list_clients = pyqtSignal(str)
-    signal_start_progress = pyqtSignal()
+    signal_start_progress = pyqtSignal(str, str)
     signal_update_progress = pyqtSignal(int, int)
     signal_end_progress = pyqtSignal()
     signal_received_ack = pyqtSignal(str)
@@ -88,7 +91,8 @@ class FileReceiverWorker(QThread):
             # Create a new ReceivingFile object
             receiving_file = ReceivingFile(self, from_name, file_path, msg_len, src_location)
             self.receiving_files[from_name] = receiving_file
-            self.signal_start_progress.emit()
+            self.signal_start_progress.emit("receive", from_name)
+            print("EMITTED")
 
         elif command == "segment":
             receiving_file = self.receiving_files[from_name]
@@ -99,11 +103,10 @@ class FileReceiverWorker(QThread):
             key_ids_list = key_ids.split('|')
             for key_id in key_ids_list:
                 key = self.get_key(key_id, self.location, receiving_file.src_location)
-                keys.extend(bytearray(key, 'utf-8'))
+                key = base64.b64decode(key)
+                keys.extend(key)
 
             receiving_file.receive_segment(segment_data, keys)
-            # encode segment_data in base64
-            base64_encoded = base64.b64encode(segment_data).decode('ascii')
 
             self.signal_update_progress.emit(receiving_file.nr_segments, receiving_file.total_segments)
 
@@ -129,6 +132,7 @@ class FileReceiverWorker(QThread):
             elif server_command == "list_clients":
                 client_reply = message_parts[1].decode()
                 self.signal_list_clients.emit(client_reply)
+            time.sleep(0.005)
             
     def stop(self):
         self.running = False

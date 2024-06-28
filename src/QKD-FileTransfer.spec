@@ -5,7 +5,7 @@ a = Analysis(
     ['qotp.py'],
     pathex=['.', './QKD-Infra-GetKey'],
     binaries=[],
-    datas=[],
+    datas=[('Logo.png', '.'), ('upb.png', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

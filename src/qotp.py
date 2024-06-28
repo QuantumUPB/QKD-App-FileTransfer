@@ -8,6 +8,7 @@ from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt
 from PyQt5.QtCore import pyqtSlot
 from PyQt5.QtWidgets import QComboBox
+from PyQt5.QtWidgets import QSizePolicy
 
 from receive import FileReceiverWorker
 from send import FileSendWorker
@@ -20,13 +21,18 @@ sys.path.append(qkdgkt_path)
 import qkdgkt
 
 import zmq
+import json
+
+with open('config.json') as f:
+    config = json.load(f)["filetransfer"]
 
 class QKDTransferApp(QWidget):
     def __init__(self):
-        self.sending = None
+        self.task_type = None
         self.config = qkdgkt.qkd_get_config()
         self.locations = qkdgkt.qkd_get_locations()
         self.client_list = []
+        self.selected_file_path = None
         super().__init__()
         self.initUI()
 
@@ -39,7 +45,7 @@ class QKDTransferApp(QWidget):
         self.init_connection_screen()
 
         # Window properties
-        self.setWindowTitle('QKD Secure File Transfer')
+        self.setWindowTitle('Quantum File Transfer')
         self.setGeometry(300, 100, 400, 100)
         self.show()
 
@@ -48,23 +54,23 @@ class QKDTransferApp(QWidget):
         self.message_label = QLabel('Connect to Broker')
         
         self.ip_label = QLabel('IP Address:')
-        self.ip_field = QLineEdit('127.0.0.1')
+        self.ip_field = QLineEdit(config['broker']['host'])
 
         self.port_label = QLabel('Port:')
-        self.port_field = QLineEdit('5555') 
+        self.port_field = QLineEdit(str(config['broker']['port']))
 
         # name label and field
         self.name_label = QLabel('Name:')
-        self.name_field = QLineEdit('Alice')
+        self.name_field = QLineEdit(config['self']['name'])
 
         # dropdown select location of client
-        self.location_label = QLabel('Location:')
-        self.location_dropdown = QComboBox()
-        self.location_dropdown.addItems(self.locations)
-        # find the index of myname
-        myloc = qkdgkt.qkd_get_myself()
-        myloc_index = self.locations.index(myloc)
-        self.location_dropdown.setCurrentIndex(myloc_index)
+        self.location_label = QLabel(f"Location: {config['self']['location']}")
+        # self.location_dropdown = QComboBox()
+        # self.location_dropdown.addItems(self.locations)
+        # # find the index of myname
+        # myloc = qkdgkt.qkd_get_myself()
+        # myloc_index = self.locations.index(myloc)
+        # self.location_dropdown.setCurrentIndex(myloc_index)
 
         self.connect_button = QPushButton('Connect')
         self.connect_button.clicked.connect(self.connect_to_server)
@@ -79,7 +85,7 @@ class QKDTransferApp(QWidget):
         self.connection_layout.addWidget(self.name_label)
         self.connection_layout.addWidget(self.name_field)
         self.connection_layout.addWidget(self.location_label)
-        self.connection_layout.addWidget(self.location_dropdown)
+        # self.connection_layout.addWidget(self.location_dropdown)
         self.connection_layout.addWidget(self.connect_button)
 
         # Add connection layout to main layout
@@ -97,6 +103,9 @@ class QKDTransferApp(QWidget):
         self.client_dropdown.addItems([client[0] for client in self.client_list if client[0] != self.client_name])
 
     def connect_to_server(self):
+        # un-show window
+        self.hide()
+
         # make connect button disabled
         self.connect_button.setEnabled(False)
         self.repaint()
@@ -104,8 +113,9 @@ class QKDTransferApp(QWidget):
         # Placeholder for connection logic
         ip = self.ip_field.text()
         port = int(self.port_field.text())
-        self.location = self.location_dropdown.currentText()
-                   
+        # self.location = self.location_dropdown.currentText()
+        self.location = config['self']['location']
+
         # Here you would add the actual connection logic using ip and port
         print(f"Connecting to {ip}:{port}...")
 
@@ -122,6 +132,9 @@ class QKDTransferApp(QWidget):
             print(f"Registered as {self.client_name}")
         else:
             print(f"Failed to register: {reply}")
+            return
+
+        self.switch_to_main_interface()
 
         self.update_client_list()
 
@@ -141,8 +154,9 @@ class QKDTransferApp(QWidget):
         self.file_send_worker.signal_end_progress.connect(self.end_progress)
         self.file_send_worker.start()
 
+        self.setGeometry(300, 100, 800, 600)
+        self.show()
         # # If connection is successful, proceed to the main interface
-        self.switch_to_main_interface()
 
     @pyqtSlot(str)
     def handle_ack(self, from_name):
@@ -160,17 +174,17 @@ class QKDTransferApp(QWidget):
         event.accept()
 
     def switch_to_main_interface(self):
-        self.setGeometry(300, 100, 800, 600)
-
         # Clear the initial connection screen
         for i in reversed(range(self.connection_layout.count())):
             widget = self.connection_layout.itemAt(i).widget()
             if widget is not None:
+                widget.hide()
                 widget.deleteLater()
         self.main_layout.removeItem(self.connection_layout)
 
         # Setup main interface components
         self.init_main_interface()
+        self.repaint()
 
     def init_main_interface(self):
         # Main layout for the file transfer interface
@@ -178,8 +192,6 @@ class QKDTransferApp(QWidget):
 
         # Explorer sidebar
         self.explorer_layout = QVBoxLayout()
-        self.explorer_label = QLabel('File Explorer')
-        self.explorer_label.setStyleSheet("font-weight: bold;")
         self.file_system_model = QFileSystemModel()
         self.file_system_model.setRootPath('')
         self.file_explorer = QTreeView()
@@ -188,7 +200,6 @@ class QKDTransferApp(QWidget):
         self.file_explorer.setSelectionMode(QTreeView.SingleSelection)
         self.file_explorer.clicked.connect(self.file_selected)
         
-        self.explorer_layout.addWidget(self.explorer_label)
         self.explorer_layout.addWidget(self.file_explorer)
 
         # Right-side layout for send and status
@@ -199,24 +210,39 @@ class QKDTransferApp(QWidget):
         self.refresh_button.clicked.connect(self.update_client_list)
 
         # dropdown select client to send file to
-        self.client_label = QLabel('Send to:')
+        self.client_label = QLabel('Select file and send to:')
         self.client_dropdown = QComboBox()
 
         self.send_button = QPushButton('SEND')
         self.send_button.setEnabled(False)
         self.send_button.clicked.connect(self.add_sending_file)
 
-        self.instructions_label = QLabel('<b>Send and Receive:</b>')
         self.listening_label = QLabel('Listening for incoming files...')
+        self.listening_label.setStyleSheet("""
+            QLabel {
+                background-color: #FFFFFF;
+                border: 1px solid lightgray;
+                padding: 5px;
+            }
+        """)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
 
         self.status_bar = QStatusBar()
-        self.status_bar.showMessage('Ready')
+        self.status_bar.showMessage('Status: Ready')
+        self.status_bar.setStyleSheet("""
+            QStatusBar {
+                border: 1px solid lightgray;
+                background-color: #FFFFFF;
+                padding: 2px;
+            }
+            QStatusBar::item {
+                border: none;
+            }
+        """)
 
-        self.right_layout.addWidget(self.instructions_label)
         self.right_layout.addWidget(self.refresh_button)
         self.right_layout.addWidget(self.client_label)
         self.right_layout.addWidget(self.client_dropdown)
@@ -229,22 +255,37 @@ class QKDTransferApp(QWidget):
         # configure about section
         self.about_layout = QVBoxLayout()
         # bold title label
-        self.about_label = QLabel('<b>QKD Unconditionally Secure File Transfer</b>')
+        self.about_label = QLabel('<b>Quantum File Transfer:</b> Unconditionally-secure file transfer enhanced by One-Time-Pad and QKD')
         self.about_label.setWordWrap(True)
+        self.about_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.about_layout.addWidget(self.about_label)
+        # add horizontal line
+        self.line = QFrame()
+        self.line.setFrameShape(QFrame.HLine)
+        self.line.setFrameShadow(QFrame.Sunken)
+        self.about_layout.addWidget(self.line)
         # add two logos to about section
         self.logo = QLabel()
-        self.logo.setPixmap(QPixmap("Logo.png").scaled(200, 200, Qt.KeepAspectRatio))
-        self.logo2 = QLabel()
-        self.logo2.setPixmap(QPixmap("upb.png").scaled(100, 100, Qt.KeepAspectRatio))
+        self.logo.setPixmap(QPixmap("Logo.png").scaled(60,60, Qt.KeepAspectRatio))
+        # self.logo2 = QLabel()
+        # self.logo2.setPixmap(QPixmap("upb.png").scaled(50, 50, Qt.KeepAspectRatio))
         self.logo_layout = QHBoxLayout()
+        self.about_copyright = QLabel('© 2024 National University of Science and Technology POLITEHNICA Bucharest')
         self.logo_layout.addWidget(self.logo)
-        self.logo_layout.addWidget(self.logo2)
+        self.logo_layout.addWidget(self.about_copyright)
+        # self.logo_layout.addWidget(self.logo2)
+        self.logo_layout.addStretch(1)
         self.about_layout.addLayout(self.logo_layout)
+        self.line2 = QFrame()
+        self.line2.setFrameShape(QFrame.HLine)
+        self.line2.setFrameShadow(QFrame.Sunken)
+        self.about_layout.addWidget(self.line2)
+
         self.about_label_website = QLabel('<a href="https://quantum.upb.ro/">Visit Website</a>')
         self.about_label_website.setOpenExternalLinks(True)
         self.about_label_github = QLabel('<a href="https://github.com/QuantumUPB/QKD-App-FileTransfer">GitHub Repository</a>')
         self.about_label_github.setOpenExternalLinks(True)
+        # self.about_layout.addWidget(self.about_copyright2)
         self.about_layout.addWidget(self.about_label_website)
         self.about_layout.addWidget(self.about_label_github)
         self.about_layout.addStretch(1)
@@ -253,7 +294,6 @@ class QKDTransferApp(QWidget):
 
         # Add about section to right layout
         self.right_layout.addLayout(self.about_layout)
-        self.right_layout.addWidget(self.status_bar)
 
         # Add explorer and right layouts to main transfer layout
         self.main_transfer_layout.addLayout(self.explorer_layout, 1)
@@ -261,36 +301,44 @@ class QKDTransferApp(QWidget):
 
         # Add main transfer layout to the main layout of the window
         self.main_layout.addLayout(self.main_transfer_layout)
+        self.main_layout.addWidget(self.status_bar)
+
+    def set_send_button_state(self):
+        if self.selected_file_path and self.client_dropdown.currentText() and not self.task_type:
+            self.send_button.setEnabled(True)
+        else:
+            self.send_button.setEnabled(False)
 
     def file_selected(self, index):
         # Get the selected file path
         self.selected_file_path = self.file_system_model.filePath(index)
-        self.send_button.setEnabled(True)
+        self.set_send_button_state()
 
     def update_timer(self):
         elapsed_time = int(self.start_time.elapsed() / 1000)
-        self.status_bar.showMessage(f'Sending file [{elapsed_time // 60 :02d}:{(elapsed_time % 60):02d} elapsed]')
-
+        self.status_bar.showMessage(f'{"Sending file to" if self.task_type == "send" else "Receiving file from"} {self.counterparty} [{elapsed_time // 60 :02d}:{(elapsed_time % 60):02d} elapsed]')
+                            
     @pyqtSlot(int, int)
     def update_progress(self, nr_segments, total_segments):
         # Update the progress bar at nr_segments / total_segments
         self.progress_bar.setValue(int(nr_segments / total_segments * 100))
         elapsed_time = int(self.start_time.elapsed() / 1000)  # Elapsed time in seconds
 
-        if self.progress_bar.value() >= 100:
-            self.timer.stop()
-            message = 'File sent successfully!' if self.sending else 'File received successfully!'
-            self.status_bar.showMessage(message)
-            self.progress_bar.setVisible(False)
-        else:
-            self.status_bar.showMessage(f'Sending file [{elapsed_time // 60 :02d}:{(elapsed_time % 60):02d} elapsed]')
+        if self.progress_bar.value() <= 100:
+            self.status_bar.showMessage(f'{"Sending file to" if self.task_type == "send" else "Receiving file from"} {self.counterparty} [{elapsed_time // 60 :02d}:{(elapsed_time % 60):02d} elapsed]')
 
-    @pyqtSlot()
-    def start_progress(self):
+    @pyqtSlot(str, str)
+    def start_progress(self, task_type, counterparty):
+        print(task_type)
+        self.task_type = task_type
+        self.counterparty = counterparty
+        message = f"Sending file to {counterparty}..." if task_type == "send" else f"Receiving file from {counterparty}..."
+
         #  file sending and update progress
+        self.send_button.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
-        self.status_bar.showMessage('Sending file...')
+        self.status_bar.showMessage(message)
         self.listening_label.setVisible(False)
         self.start_time = QTime.currentTime()
         self.timer = QTimer(self)
@@ -300,8 +348,12 @@ class QKDTransferApp(QWidget):
     @pyqtSlot()
     def end_progress(self):
         self.progress_bar.setValue(100)
-        self.status_bar.showMessage('File sent successfully!')
+        self.timer.stop()
+        self.status_bar.showMessage(f'File sent successfully to {self.counterparty}!' if self.task_type == 'send' else f'File received successfully from {self.counterparty}!')
         self.progress_bar.setVisible(False)
+        self.listening_label.setVisible(True)
+        self.task_type = None
+        self.set_send_button_state()
 
     def add_sending_file(self):
         # get selected client

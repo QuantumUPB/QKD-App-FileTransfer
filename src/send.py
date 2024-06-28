@@ -7,7 +7,9 @@ import json
 import time
 import base64
 
-seg_length = 120
+with open('config.json') as f:
+    config = json.load(f)["filetransfer"]
+seg_length = config['segment_size']
 
 qkdgkt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'QKD-Infra-GetKey'))
 sys.path.append(qkdgkt_path)
@@ -40,7 +42,7 @@ class SendFile:
 
 
 class FileSendWorker(QThread):
-    signal_start_progress = pyqtSignal()
+    signal_start_progress = pyqtSignal(str, str)
     signal_update_progress = pyqtSignal(int, int)
     signal_end_progress = pyqtSignal()
 
@@ -53,7 +55,7 @@ class FileSendWorker(QThread):
     def add_file(self, to_name, file_path, src_location, dest_location):
         sending_file = SendFile(to_name, file_path, src_location, dest_location)
         self.sending_files.append(sending_file)
-        self.signal_start_progress.emit()
+        self.signal_start_progress.emit("send", to_name)
     
     def handle_ack(self, to_name):
         for sending_file in self.sending_files:
@@ -77,6 +79,7 @@ class FileSendWorker(QThread):
                     else:
                         self.sending_files.pop(i)
                         self.signal_end_progress.emit()
+            time.sleep(0.005)
     
     def send_metadata(self, sending_file):
         # Send the number of segments needed for the message via zmq
@@ -101,7 +104,8 @@ class FileSendWorker(QThread):
         key_ids_list = []
         while len(accumulated_keys) < seg_length:
             key, key_ID = self.get_key(sending_file.dest_location, sending_file.src_location)
-            accumulated_keys.extend(bytearray(key, 'utf-8'))
+            key = base64.b64decode(key)
+            accumulated_keys.extend(key)
             key_ids_list.append(key_ID)
 
         batch_len = min(seg_length, len(message))
@@ -123,9 +127,6 @@ class FileSendWorker(QThread):
             # Send the key ids
             self.socket.send_multipart([f"relay:{sending_file.to_name}".encode(), "segment".encode(), encrypted_message_bytes, key_ids_bytes])
 
-            # sleep 1 second using sleep
-            # time.sleep(1)
-            
         except ConnectionRefusedError:
             print("ECONNREFUSED")
         

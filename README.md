@@ -53,7 +53,7 @@ Next, you'll have to provide:
 
 ### How it works
 
-<img src="qotp-app.png" alt="GUI of the application" width="250"/>
+<img src="qotp-app.png" alt="GUI of the application" width="1000"/>
 
 The default mode of the application is to listen for incoming files. Any number of clients can connect to the broker, and may send files between themselves.
 
@@ -67,7 +67,11 @@ After selecting a file and a receiver, you can press the `SEND` button to begin 
 
 - The broker machine should only allow connections from a secure subnet in which the clients are situated.
 
-2024 Quantum Team @ UPB
+### Copyright and license
+
+This work is designed and implemented by the Quantum Team at POLITEHNICA Bucharest. All rights reserved, (C) 2024.
+
+If you use this software for research purposes, please follow the instructions in the "Cite this repository" option from the side panel.
 
 This work has been developed within RoNaQCI, part of EuroQCI, DIGITAL-2021-QCI-01-DEPLOY-NATIONAL, 101091562.
 

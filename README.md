@@ -10,7 +10,7 @@
 
 This application implements an unconditionally secure file transfer protocol enhanced by QKD.
 
-This application has been developed by the Quantum Team @ UPB, and is provided to everyone for fair usage according to the License. This provided version of the application only implements the communication protocol between two parties, who can both either be a sender or receiver of files.
+This application has been developed by the Quantum Team @ UPB, and is provided to everyone for fair usage according to the License.
 
 ### Features
 

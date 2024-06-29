@@ -25,7 +25,7 @@ class QKDTransferApp(QWidget):
     def __init__(self):
         self.sending = None
         self.config = qkdgkt.qkd_get_config()
-        self.locations = qkdgkt.qkd_get_locations()
+        self.locations = qkdgkt.qkd_get_location_names()
         self.client_list = []
         super().__init__()
         self.initUI()

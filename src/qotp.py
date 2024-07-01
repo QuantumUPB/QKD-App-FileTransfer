@@ -30,7 +30,7 @@ class QKDTransferApp(QWidget):
     def __init__(self):
         self.task_type = None
         self.config = qkdgkt.qkd_get_config()
-        self.locations = qkdgkt.qkd_get_locations()
+        self.locations = qkdgkt.qkd_get_location_names()
         self.client_list = []
         self.selected_file_path = None
         super().__init__()

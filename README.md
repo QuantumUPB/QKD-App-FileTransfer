@@ -16,6 +16,9 @@ This application has been developed by the Quantum Team @ UPB, and is provided t
 
 - Secure file transfer using One-Time Pad (OTP) encryption enhanced by QKD.
 - Straighforward, user-friendly interface.
+- Reliable service which supports clients disconnecting and reconnecting
+- Scalable broker service which supports simultaneous relaying between multiple pairs of clients at the same time
+- Fully compatible with ETSI-014 QKD standard
 
 ### Requirements
 

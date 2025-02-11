@@ -148,6 +148,7 @@ class FileSendWorker(QThread):
         self.running = False
 
     def get_key(self, destination, source):
+        time.sleep(0.2)
         config = qkdgkt.qkd_get_config()
 
         cert = config['cert']
@@ -157,7 +158,11 @@ class FileSendWorker(QThread):
         ipport = [loc for loc in config['locations'] if loc['name'] == source][0]['ipport']
         endpoint = [loc for loc in config['locations'] if loc['name'] == destination][0]['endpoint']
 
-        output = qkdgkt.qkd_get_key_custom_params(endpoint, ipport, cert, cakey, cacert, pempassword, 'Request')
+        base_url = ipport
+        if os.environ.get("ADD_KME", "") != "":
+            base_url += "/" + os.getenv("LOCATION", "ADD_LOCATION") + "/" + os.getenv("CONSUMER", "ADD_CONSUMER")
+
+        output = qkdgkt.qkd_get_key_custom_params(endpoint, base_url, cert, cakey, cacert, pempassword, 'Request')
         response = json.loads(output)
         # print(response)
 

@@ -155,7 +155,11 @@ class FileReceiverWorker(QThread):
         ipport = [loc for loc in config['locations'] if loc['name'] == my_location][0]['ipport']
         endpoint = [loc for loc in config['locations'] if loc['name'] == source][0]['endpoint']
 
-        output = qkdgkt.qkd_get_key_custom_params(endpoint, ipport, cert, cakey, cacert, pempassword, 'Response', key_id)
+        base_url = ipport
+        if os.environ.get("ADD_KME", "") != "":
+            base_url += "/" + os.getenv("LOCATION", "ADD_LOCATION") + "/" + os.getenv("CONSUMER", "ADD_CONSUMER")
+
+        output = qkdgkt.qkd_get_key_custom_params(endpoint, base_url, cert, cakey, cacert, pempassword, 'Response', key_id)
         response = json.loads(output)
 
         keys = response['keys']

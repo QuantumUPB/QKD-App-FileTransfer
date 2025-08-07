@@ -15,8 +15,21 @@ import json
 import base64
 import time
 
-with open('config.json') as f:
-    config = json.load(f)["filetransfer"]
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python <3.11
+    import tomli as tomllib
+
+
+# Load user configuration if available; otherwise fall back to the sample file
+# shipped with the repository.  This keeps runtime configuration outside the
+# repository while providing sensible defaults.
+_config_path = os.path.join(os.path.dirname(__file__), 'config.toml')
+if not os.path.exists(_config_path):
+    _config_path = os.path.join(os.path.dirname(__file__), 'config_sample.toml')
+with open(_config_path, 'rb') as f:
+    config = tomllib.load(f)
 seg_length = config['segment_size']
 
 qkdgkt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'QKD-Infra-GetKey'))
@@ -79,7 +92,7 @@ class FileReceiverWorker(QThread):
         self.socket = socket
         self.running = True
         self.receiving_files = {}
-        self.location = location
+        self.location = qkdgkt.get_myself()
 
     def handle_relay(self, message_parts):
         from_name = message_parts[0].decode()
@@ -92,6 +105,8 @@ class FileReceiverWorker(QThread):
             msg_len = int(content.split("/".encode('utf-8'))[0])
             file_path = str(content.split("/".encode('utf-8'))[1], 'utf-8')
             src_location = str(content.split("/".encode('utf-8'))[2], 'utf-8')
+            if src_location == "":
+                src_location = from_name
             print("File name: " + file_path)
             print("Payload length: " + str(msg_len) + " bytes.")
             print("Location: " + src_location)
@@ -146,23 +161,11 @@ class FileReceiverWorker(QThread):
         self.running = False
 
     def get_key(self, key_id, my_location, source):
-        config = qkdgkt.qkd_get_config()
-
-        cert = config['cert']
-        cakey = config['key']
-        cacert = config['cacert']
-        pempassword = config['pempassword']
-        ipport = [loc for loc in config['locations'] if loc['name'] == my_location][0]['ipport']
-        endpoint = [loc for loc in config['locations'] if loc['name'] == source][0]['endpoint']
-
-        base_url = ipport
-        if os.environ.get("ADD_KME", "") != "":
-            base_url += "/" + os.getenv("LOCATION", "ADD_LOCATION") + "/" + os.getenv("CONSUMER", "ADD_CONSUMER")
-
-        output = qkdgkt.qkd_get_key_custom_params(endpoint, base_url, cert, cakey, cacert, pempassword, 'Response', key_id)
-        response = json.loads(output)
+        response = qkdgkt.get_key_with_id(source, key_id)
+        if isinstance(response, str):
+            response = json.loads(response)
 
         keys = response['keys']
         for key_data in keys:
-            key = key_data['key']
-            return key
+            return key_data['key']
+

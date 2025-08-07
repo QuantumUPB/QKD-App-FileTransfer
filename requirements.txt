@@ -1,0 +1,7 @@
+pyzmq
+numpy
+PyQt5
+requests
+click
+tomli
+

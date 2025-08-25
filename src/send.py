@@ -73,7 +73,7 @@ class FileSendWorker(QThread):
 
     def add_file(self, to_name, file_path, src_location, dest_location):
         if dest_location == "":
-            dest_location == to_name
+            dest_location = to_name
         sending_file = SendFile(to_name, file_path, src_location, dest_location)
         self.sending_files.append(sending_file)
         self.signal_start_progress.emit("send", to_name)
